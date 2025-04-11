@@ -14,7 +14,7 @@ import { fileURLToPath } from 'url';
 const defaultMemoryPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'memory.json');
 
 // If MEMORY_FILE_PATH is just a filename, put it in the same directory as the script
-const MEMORY_FILE_PATH = process.env.MEMORY_FILE_PATH
+let MEMORY_FILE_PATH = process.env.MEMORY_FILE_PATH
   ? path.isAbsolute(process.env.MEMORY_FILE_PATH)
     ? process.env.MEMORY_FILE_PATH
     : path.join(path.dirname(fileURLToPath(import.meta.url)), process.env.MEMORY_FILE_PATH)
@@ -40,9 +40,23 @@ interface KnowledgeGraph {
 
 // The KnowledgeGraphManager class contains all operations to interact with the knowledge graph
 class KnowledgeGraphManager {
+  private memoryFilePath: string;
+
+  constructor(memoryFilePath: string) {
+    this.memoryFilePath = memoryFilePath;
+  }
+
+  setMemoryFilePath(newPath: string): void {
+    this.memoryFilePath = newPath;
+  }
+
+  getMemoryFilePath(): string {
+    return this.memoryFilePath;
+  }
+
   private async loadGraph(): Promise<KnowledgeGraph> {
     try {
-      const data = await fs.readFile(MEMORY_FILE_PATH, "utf-8");
+      const data = await fs.readFile(this.memoryFilePath, "utf-8");
       const lines = data.split("\n").filter(line => line.trim() !== "");
       return lines.reduce((graph: KnowledgeGraph, line) => {
         const item = JSON.parse(line);
@@ -63,7 +77,7 @@ class KnowledgeGraphManager {
       ...graph.entities.map(e => JSON.stringify({ type: "entity", ...e })),
       ...graph.relations.map(r => JSON.stringify({ type: "relation", ...r })),
     ];
-    await fs.writeFile(MEMORY_FILE_PATH, lines.join("\n"));
+    await fs.writeFile(this.memoryFilePath, lines.join("\n"));
   }
 
   async createEntities(entities: Entity[]): Promise<Entity[]> {
@@ -183,7 +197,7 @@ class KnowledgeGraphManager {
   }
 }
 
-const knowledgeGraphManager = new KnowledgeGraphManager();
+const knowledgeGraphManager = new KnowledgeGraphManager(MEMORY_FILE_PATH);
 
 
 // The server instance and tools exposed to Claude
@@ -369,6 +383,37 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["names"],
         },
       },
+      {
+        name: "health_check",
+        description: "Check if the server is running and can access its resources",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          title: "health_checkArguments",
+        },
+      },
+      {
+        name: "set_memory_file",
+        description: "Change the memory file path used for storing the knowledge graph",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { 
+              type: "string", 
+              description: "New file path for the memory file. Can be absolute or relative to the server directory." 
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
+        name: "get_memory_file",
+        description: "Get the current memory file path used for storing the knowledge graph",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
     ],
   };
 });
@@ -376,7 +421,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
-  if (!args) {
+  if (!args && name !== "health_check" && name !== "get_memory_file") {
     throw new Error(`No arguments provided for tool: ${name}`);
   }
 
@@ -402,6 +447,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.searchNodes(args.query as string), null, 2) }] };
     case "open_nodes":
       return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.openNodes(args.names as string[]), null, 2) }] };
+    case "health_check":
+      return { content: [{ type: "text", text: JSON.stringify({ 
+        status: "ok", 
+        memoryFilePath: knowledgeGraphManager.getMemoryFilePath() 
+      }, null, 2) }] };
+    case "set_memory_file":
+      try {
+        const newPath = args.path as string;
+        // If path is just a filename, put it in the same directory as the script
+        const resolvedPath = path.isAbsolute(newPath)
+          ? newPath
+          : path.join(path.dirname(fileURLToPath(import.meta.url)), newPath);
+          
+        // Create empty file if it doesn't exist
+        try {
+          await fs.access(resolvedPath);
+        } catch (error) {
+          await fs.writeFile(resolvedPath, "");
+        }
+        
+        knowledgeGraphManager.setMemoryFilePath(resolvedPath);
+        return { content: [{ type: "text", text: `Memory file path changed to: ${resolvedPath}` }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: `Error changing memory file: ${error.message}` }] };
+      }
+    case "get_memory_file":
+      return { content: [{ type: "text", text: knowledgeGraphManager.getMemoryFilePath() }] };
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -411,6 +483,7 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Knowledge Graph MCP Server running on stdio");
+  console.error(`Using memory file: ${knowledgeGraphManager.getMemoryFilePath()}`);
 }
 
 main().catch((error) => {
