@@ -1,14 +1,17 @@
 {
-  "name": "@modelcontextprotocol/server-memory",
-  "version": "0.6.3",
-  "description": "MCP server for enabling memory for Claude through a knowledge graph",
+  "name": "@modelcontextprotocol/server-memory-dynamic",
+  "version": "0.7.0",
+  "description": "MCP server for enabling memory for Claude through a knowledge graph with dynamic memory file support",
   "license": "MIT",
   "author": "Anthropic, PBC (https://anthropic.com)",
+  "contributors": [
+    "Matheus Prol (https://github.com/mhprol)"
+  ],
   "homepage": "https://modelcontextprotocol.io",
-  "bugs": "https://github.com/modelcontextprotocol/servers/issues",
+  "bugs": "https://github.com/mhprol/servers/issues",
   "type": "module",
   "bin": {
-    "mcp-server-memory": "dist/index.js"
+    "mcp-server-memory-dynamic": "dist/index.js"
   },
   "files": [
     "dist"
