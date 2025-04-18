@@ -14,7 +14,7 @@ import { fileURLToPath } from 'url';
 const defaultMemoryPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'memory.json');
 
 // If MEMORY_FILE_PATH is just a filename, put it in the same directory as the script
-const MEMORY_FILE_PATH = process.env.MEMORY_FILE_PATH
+let MEMORY_FILE_PATH = process.env.MEMORY_FILE_PATH
   ? path.isAbsolute(process.env.MEMORY_FILE_PATH)
     ? process.env.MEMORY_FILE_PATH
     : path.join(path.dirname(fileURLToPath(import.meta.url)), process.env.MEMORY_FILE_PATH)
@@ -40,9 +40,23 @@ interface KnowledgeGraph {
 
 // The KnowledgeGraphManager class contains all operations to interact with the knowledge graph
 class KnowledgeGraphManager {
+  private memoryFilePath: string;
+
+  constructor(memoryFilePath: string) {
+    this.memoryFilePath = memoryFilePath;
+  }
+
+  setMemoryFilePath(newPath: string): void {
+    this.memoryFilePath = newPath;
+  }
+
+  getMemoryFilePath(): string {
+    return this.memoryFilePath;
+  }
+
   private async loadGraph(): Promise<KnowledgeGraph> {
     try {
-      const data = await fs.readFile(MEMORY_FILE_PATH, "utf-8");
+      const data = await fs.readFile(this.memoryFilePath, "utf-8");
       const lines = data.split("\n").filter(line => line.trim() !== "");
       return lines.reduce((graph: KnowledgeGraph, line) => {
         const item = JSON.parse(line);
@@ -63,7 +77,7 @@ class KnowledgeGraphManager {
       ...graph.entities.map(e => JSON.stringify({ type: "entity", ...e })),
       ...graph.relations.map(r => JSON.stringify({ type: "relation", ...r })),
     ];
-    await fs.writeFile(MEMORY_FILE_PATH, lines.join("\n"));
+    await fs.writeFile(this.memoryFilePath, lines.join("\n"));
   }
 
   async createEntities(entities: Entity[]): Promise<Entity[]> {
@@ -133,11 +147,123 @@ class KnowledgeGraphManager {
     return this.loadGraph();
   }
 
-  // Very basic search function
+  // Enhanced search function with support for relation-specific queries
   async searchNodes(query: string): Promise<KnowledgeGraph> {
     const graph = await this.loadGraph();
     
-    // Filter entities
+    // Special pattern for relations query
+    const relationQueryRegex = /relations\s+(\w+)/i;
+    const fromQueryRegex = /from\s+(\w+)/i;
+    const toQueryRegex = /to\s+(\w+)/i;
+    const typeQueryRegex = /type\s+(\w+)/i;
+    
+    const relationMatch = query.match(relationQueryRegex);
+    const fromMatch = query.match(fromQueryRegex);
+    const toMatch = query.match(toQueryRegex);
+    const typeMatch = query.match(typeQueryRegex);
+    
+    // Handle relation-specific queries
+    if (relationMatch || fromMatch || toMatch || typeMatch) {
+      let filteredRelations: Relation[] = [...graph.relations];
+      
+      // Filter for "relations [entity]" query
+      if (relationMatch) {
+        const entityName = relationMatch[1];
+        filteredRelations = filteredRelations.filter(r => 
+          r.from === entityName || r.to === entityName
+        );
+      }
+      
+      // Filter for "from [entity]" query
+      if (fromMatch) {
+        const fromEntity = fromMatch[1];
+        filteredRelations = filteredRelations.filter(r => r.from === fromEntity);
+      }
+      
+      // Filter for "to [entity]" query
+      if (toMatch) {
+        const toEntity = toMatch[1];
+        filteredRelations = filteredRelations.filter(r => r.to === toEntity);
+      }
+      
+      // Filter for "type [relationType]" query
+      if (typeMatch) {
+        const relationType = typeMatch[1];
+        filteredRelations = filteredRelations.filter(r => 
+          r.relationType.toLowerCase().includes(relationType.toLowerCase())
+        );
+      }
+      
+      // Get all the unique entity names involved in these relations
+      const relatedEntityNames = new Set<string>();
+      filteredRelations.forEach(r => {
+        relatedEntityNames.add(r.from);
+        relatedEntityNames.add(r.to);
+      });
+      
+      // Get the entities with these names
+      const filteredEntities = graph.entities.filter(e => 
+        relatedEntityNames.has(e.name)
+      );
+      
+      return {
+        entities: filteredEntities,
+        relations: filteredRelations
+      };
+    }
+    
+    // Handle multiple search terms separated by spaces
+    const searchTerms = query.trim().split(/\s+/);
+    
+    if (searchTerms.length > 1) {
+      // For multiple terms, each term should match at least one entity
+      const matchingEntitiesByTerm: Map<string, Set<string>> = new Map();
+      
+      // Find entities matching each term
+      for (const term of searchTerms) {
+        const termLower = term.toLowerCase();
+        const matchingEntities = new Set<string>();
+        
+        // Find entities matching this term
+        for (const entity of graph.entities) {
+          if (
+            entity.name.toLowerCase().includes(termLower) ||
+            entity.entityType.toLowerCase().includes(termLower) ||
+            entity.observations.some(o => o.toLowerCase().includes(termLower))
+          ) {
+            matchingEntities.add(entity.name);
+          }
+        }
+        
+        // Store the matching entities for this term
+        matchingEntitiesByTerm.set(term, matchingEntities);
+      }
+      
+      // Collect all entities that match at least one term
+      const allMatchingEntities = new Set<string>();
+      for (const matchingEntities of matchingEntitiesByTerm.values()) {
+        for (const entityName of matchingEntities) {
+          allMatchingEntities.add(entityName);
+        }
+      }
+      
+      // Filter the entities to only include those that matched at least one term
+      const filteredEntities = graph.entities.filter(e => 
+        allMatchingEntities.has(e.name)
+      );
+      
+      // Filter relations to only include those between filtered entities
+      const filteredRelations = graph.relations.filter(r => 
+        allMatchingEntities.has(r.from) && allMatchingEntities.has(r.to)
+      );
+      
+      return {
+        entities: filteredEntities,
+        relations: filteredRelations,
+      };
+    }
+    
+    // Regular text search (original behavior) for single terms
     const filteredEntities = graph.entities.filter(e => 
       e.name.toLowerCase().includes(query.toLowerCase()) ||
       e.entityType.toLowerCase().includes(query.toLowerCase()) ||
@@ -152,12 +278,10 @@ class KnowledgeGraphManager {
       filteredEntityNames.has(r.from) && filteredEntityNames.has(r.to)
     );
   
-    const filteredGraph: KnowledgeGraph = {
+    return {
       entities: filteredEntities,
       relations: filteredRelations,
     };
-  
-    return filteredGraph;
   }
 
   async openNodes(names: string[]): Promise<KnowledgeGraph> {
@@ -183,7 +307,7 @@ class KnowledgeGraphManager {
   }
 }
 
-const knowledgeGraphManager = new KnowledgeGraphManager();
+const knowledgeGraphManager = new KnowledgeGraphManager(MEMORY_FILE_PATH);
 
 
 // The server instance and tools exposed to Claude
@@ -369,6 +493,37 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["names"],
         },
       },
+      {
+        name: "health_check",
+        description: "Check if the server is running and can access its resources",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          title: "health_checkArguments",
+        },
+      },
+      {
+        name: "set_memory_file",
+        description: "Change the memory file path used for storing the knowledge graph",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { 
+              type: "string", 
+              description: "New file path for the memory file. Can be absolute or relative to the server directory." 
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
+        name: "get_memory_file",
+        description: "Get the current memory file path used for storing the knowledge graph",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
     ],
   };
 });
@@ -376,7 +531,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
-  if (!args) {
+  if (!args && name !== "health_check" && name !== "get_memory_file") {
     throw new Error(`No arguments provided for tool: ${name}`);
   }
 
@@ -402,6 +557,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.searchNodes(args.query as string), null, 2) }] };
     case "open_nodes":
       return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.openNodes(args.names as string[]), null, 2) }] };
+    case "health_check":
+      return { content: [{ type: "text", text: JSON.stringify({ 
+        status: "ok", 
+        memoryFilePath: knowledgeGraphManager.getMemoryFilePath() 
+      }, null, 2) }] };
+    case "set_memory_file":
+      try {
+        const newPath = args.path as string;
+        // If path is just a filename, put it in the same directory as the script
+        const resolvedPath = path.isAbsolute(newPath)
+          ? newPath
+          : path.join(path.dirname(fileURLToPath(import.meta.url)), newPath);
+          
+        // Create empty file if it doesn't exist
+        try {
+          await fs.access(resolvedPath);
+        } catch (error) {
+          await fs.writeFile(resolvedPath, "");
+        }
+        
+        knowledgeGraphManager.setMemoryFilePath(resolvedPath);
+        return { content: [{ type: "text", text: `Memory file path changed to: ${resolvedPath}` }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: `Error changing memory file: ${error.message}` }] };
+      }
+    case "get_memory_file":
+      return { content: [{ type: "text", text: knowledgeGraphManager.getMemoryFilePath() }] };
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -411,6 +593,7 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Knowledge Graph MCP Server running on stdio");
+  console.error(`Using memory file: ${knowledgeGraphManager.getMemoryFilePath()}`);
 }
 
 main().catch((error) => {
