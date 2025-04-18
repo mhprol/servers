@@ -147,11 +147,72 @@ class KnowledgeGraphManager {
     return this.loadGraph();
   }
 
-  // Very basic search function
+  // Enhanced search function with support for relation-specific queries
   async searchNodes(query: string): Promise<KnowledgeGraph> {
     const graph = await this.loadGraph();
     
-    // Filter entities
+    // Special pattern for relations query
+    const relationQueryRegex = /relations\s+(\w+)/i;
+    const fromQueryRegex = /from\s+(\w+)/i;
+    const toQueryRegex = /to\s+(\w+)/i;
+    const typeQueryRegex = /type\s+(\w+)/i;
+    
+    const relationMatch = query.match(relationQueryRegex);
+    const fromMatch = query.match(fromQueryRegex);
+    const toMatch = query.match(toQueryRegex);
+    const typeMatch = query.match(typeQueryRegex);
+    
+    // Handle relation-specific queries
+    if (relationMatch || fromMatch || toMatch || typeMatch) {
+      let filteredRelations: Relation[] = [...graph.relations];
+      
+      // Filter for "relations [entity]" query
+      if (relationMatch) {
+        const entityName = relationMatch[1];
+        filteredRelations = filteredRelations.filter(r => 
+          r.from === entityName || r.to === entityName
+        );
+      }
+      
+      // Filter for "from [entity]" query
+      if (fromMatch) {
+        const fromEntity = fromMatch[1];
+        filteredRelations = filteredRelations.filter(r => r.from === fromEntity);
+      }
+      
+      // Filter for "to [entity]" query
+      if (toMatch) {
+        const toEntity = toMatch[1];
+        filteredRelations = filteredRelations.filter(r => r.to === toEntity);
+      }
+      
+      // Filter for "type [relationType]" query
+      if (typeMatch) {
+        const relationType = typeMatch[1];
+        filteredRelations = filteredRelations.filter(r => 
+          r.relationType.toLowerCase().includes(relationType.toLowerCase())
+        );
+      }
+      
+      // Get all the unique entity names involved in these relations
+      const relatedEntityNames = new Set<string>();
+      filteredRelations.forEach(r => {
+        relatedEntityNames.add(r.from);
+        relatedEntityNames.add(r.to);
+      });
+      
+      // Get the entities with these names
+      const filteredEntities = graph.entities.filter(e => 
+        relatedEntityNames.has(e.name)
+      );
+      
+      return {
+        entities: filteredEntities,
+        relations: filteredRelations
+      };
+    }
+    
+    // Regular text search (original behavior)
     const filteredEntities = graph.entities.filter(e => 
       e.name.toLowerCase().includes(query.toLowerCase()) ||
       e.entityType.toLowerCase().includes(query.toLowerCase()) ||
@@ -166,12 +227,10 @@ class KnowledgeGraphManager {
       filteredEntityNames.has(r.from) && filteredEntityNames.has(r.to)
     );
   
-    const filteredGraph: KnowledgeGraph = {
+    return {
       entities: filteredEntities,
       relations: filteredRelations,
     };
-  
-    return filteredGraph;
   }
 
   async openNodes(names: string[]): Promise<KnowledgeGraph> {

@@ -17,15 +17,15 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc && shx chmod +x dist/*.js",
+    "build": "tsc",
     "prepare": "npm run build",
     "watch": "tsc --watch"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.0.1"
+    "@modelcontextprotocol/sdk": "^1.0.1"
   },
   "devDependencies": {
-    "@types/node": "^22",
+    "@types/node": "^22.14.0",
     "shx": "^0.3.4",
     "typescript": "^5.6.2"
   }
