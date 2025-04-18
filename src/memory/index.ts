@@ -212,7 +212,58 @@ class KnowledgeGraphManager {
       };
     }
     
-    // Regular text search (original behavior)
+    // Handle multiple search terms separated by spaces
+    const searchTerms = query.trim().split(/\s+/);
+    
+    if (searchTerms.length > 1) {
+      // For multiple terms, each term should match at least one entity
+      const matchingEntitiesByTerm: Map<string, Set<string>> = new Map();
+      
+      // Find entities matching each term
+      for (const term of searchTerms) {
+        const termLower = term.toLowerCase();
+        const matchingEntities = new Set<string>();
+        
+        // Find entities matching this term
+        for (const entity of graph.entities) {
+          if (
+            entity.name.toLowerCase().includes(termLower) ||
+            entity.entityType.toLowerCase().includes(termLower) ||
+            entity.observations.some(o => o.toLowerCase().includes(termLower))
+          ) {
+            matchingEntities.add(entity.name);
+          }
+        }
+        
+        // Store the matching entities for this term
+        matchingEntitiesByTerm.set(term, matchingEntities);
+      }
+      
+      // Collect all entities that match at least one term
+      const allMatchingEntities = new Set<string>();
+      for (const matchingEntities of matchingEntitiesByTerm.values()) {
+        for (const entityName of matchingEntities) {
+          allMatchingEntities.add(entityName);
+        }
+      }
+      
+      // Filter the entities to only include those that matched at least one term
+      const filteredEntities = graph.entities.filter(e => 
+        allMatchingEntities.has(e.name)
+      );
+      
+      // Filter relations to only include those between filtered entities
+      const filteredRelations = graph.relations.filter(r => 
+        allMatchingEntities.has(r.from) && allMatchingEntities.has(r.to)
+      );
+      
+      return {
+        entities: filteredEntities,
+        relations: filteredRelations,
+      };
+    }
+    
+    // Regular text search (original behavior) for single terms
     const filteredEntities = graph.entities.filter(e => 
       e.name.toLowerCase().includes(query.toLowerCase()) ||
       e.entityType.toLowerCase().includes(query.toLowerCase()) ||
