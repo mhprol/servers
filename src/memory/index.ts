@@ -296,7 +296,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
-  if (!args && 
+  if (args === undefined && 
       name !== "health_check" && 
       name !== "get_memory_file" &&
       name !== "read_graph" &&
@@ -307,47 +307,63 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   switch (name) {
     // Entity operations
     case "create_entities":
-      return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.createEntities(args.entities as Entity[]), null, 2) }] };
+      return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.createEntities(args?.entities as Entity[] || []), null, 2) }] };
     
     case "expand_entity":
-      const entity = await knowledgeGraphManager.expandEntity(args.name as string);
+      const entity = await knowledgeGraphManager.expandEntity(args?.name as string || "");
       if (!entity) {
-        return { content: [{ type: "text", text: `Entity with name "${args.name}" not found` }] };
+        return { content: [{ type: "text", text: `Entity with name "${args?.name}" not found` }] };
       }
       return { content: [{ type: "text", text: JSON.stringify(entity, null, 2) }] };
     
     case "get_entities_by_type":
-      const entitiesByType = await knowledgeGraphManager.storageManager.getEntitiesByType(args.entityType as string);
+      const entitiesByType = await knowledgeGraphManager.storageManager.getEntitiesByType(args?.entityType as string || "");
       return { content: [{ type: "text", text: JSON.stringify(entitiesByType, null, 2) }] };
     
     // Relation operations
     case "create_relations":
-      return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.createRelations(args.relations as Relation[]), null, 2) }] };
+      return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.createRelations(args?.relations as Relation[] || []), null, 2) }] };
     
     case "get_relations_by_type":
-      const relationsByType = await knowledgeGraphManager.storageManager.getRelationsByType(args.relationType as string);
+      const relationsByType = await knowledgeGraphManager.storageManager.getRelationsByType(args?.relationType as string || "");
       return { content: [{ type: "text", text: JSON.stringify(relationsByType, null, 2) }] };
     
     // Observation operations
     case "add_observations":
-      return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.addObservations(args.observations as { entityName: string; contents: string[] }[]), null, 2) }] };
+      return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.addObservations(args?.observations as { entityName: string; contents: string[] }[] || []), null, 2) }] };
     
     // Delete operations
     case "delete_entities":
-      await knowledgeGraphManager.deleteEntities(args.entityNames as string[]);
+      await knowledgeGraphManager.deleteEntities(args?.entityNames as string[] || []);
       return { content: [{ type: "text", text: "Entities deleted successfully" }] };
     
     case "delete_observations":
-      await knowledgeGraphManager.deleteObservations(args.deletions as { entityName: string; observations: string[] }[]);
+      await knowledgeGraphManager.deleteObservations(args?.deletions as { entityName: string; observations: string[] }[] || []);
       return { content: [{ type: "text", text: "Observations deleted successfully" }] };
     
     case "delete_relations":
-      await knowledgeGraphManager.deleteRelations(args.relations as Relation[]);
+      await knowledgeGraphManager.deleteRelations(args?.relations as Relation[] || []);
       return { content: [{ type: "text", text: "Relations deleted successfully" }] };
     
     // Read operations
     case "read_index":
-      return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.readIndex(), null, 2) }] };
+      const indexStructure = await knowledgeGraphManager.readIndex();
+      // Prepare index for serialization (Maps need special handling)
+      const serializableIndex = {
+        metadata: indexStructure.metadata,
+        entityIndices: Object.fromEntries(indexStructure.entityIndices),
+        typeIndices: Object.fromEntries(
+          Array.from(indexStructure.typeIndices.entries()).map(
+            ([type, entities]) => [type, Array.from(entities)]
+          )
+        ),
+        relationIndices: Object.fromEntries(
+          Array.from(indexStructure.relationIndices.entries()).map(
+            ([type, relations]) => [type, Array.from(relations)]
+          )
+        )
+      };
+      return { content: [{ type: "text", text: JSON.stringify(serializableIndex, null, 2) }] };
     
     case "read_graph":
       console.warn("Warning: read_graph is a high-context operation");
@@ -356,10 +372,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     
     // Search operations
     case "search_nodes":
-      return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.searchNodes(args.query as string), null, 2) }] };
+      return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.searchNodes(args?.query as string || ""), null, 2) }] };
     
     case "open_nodes":
-      return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.openNodes(args.names as string[]), null, 2) }] };
+      return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.openNodes(args?.names as string[] || []), null, 2) }] };
     
     // Utility operations
     case "health_check":
@@ -372,7 +388,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     
     case "set_memory_file":
       try {
-        const newPath = args.path as string;
+        const newPath = args?.path as string || "";
         // If path is just a filename, put it in the same directory as the script
         const resolvedPath = path.isAbsolute(newPath)
           ? newPath
@@ -381,14 +397,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Create empty file if it doesn't exist
         try {
           await fs.access(resolvedPath);
-        } catch (error) {
+        } catch (error: any) {
           await fs.writeFile(resolvedPath, "");
         }
         
         knowledgeGraphManager.setMemoryFilePath(resolvedPath);
         return { content: [{ type: "text", text: `Memory file path changed to: ${resolvedPath}` }] };
       } catch (error) {
-        return { content: [{ type: "text", text: `Error changing memory file: ${error.message}` }] };
+        return { content: [{ type: "text", text: `Error changing memory file: ${error instanceof Error ? error.message : String(error)}` }] };
       }
     
     case "get_memory_file":
