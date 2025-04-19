@@ -1,7 +1,7 @@
 {
   "name": "@modelcontextprotocol/server-memory-dynamic",
-  "version": "0.7.0",
-  "description": "MCP server for enabling memory for Claude through a knowledge graph with dynamic memory file support",
+  "version": "2.0.0",
+  "description": "MCP server for enabling memory for Claude through a knowledge graph with index-first architecture and dynamic memory file support",
   "license": "MIT",
   "author": "Anthropic, PBC (https://anthropic.com)",
   "contributors": [
@@ -11,7 +11,8 @@
   "bugs": "https://github.com/mhprol/servers/issues",
   "type": "module",
   "bin": {
-    "mcp-server-memory-dynamic": "dist/index.js"
+    "mcp-server-memory-dynamic": "dist/index.js",
+    "mcp-memory-migrate": "dist/migrate.js"
   },
   "files": [
     "dist"
@@ -19,7 +20,8 @@
   "scripts": {
     "build": "tsc && shx chmod +x dist/*.js",
     "prepare": "npm run build",
-    "watch": "tsc --watch"
+    "watch": "tsc --watch",
+    "migrate": "node dist/migrate.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.0.1"
